@@ -1232,11 +1232,31 @@ class OpenAIServing:
                 )
 
             # Automatic Tool Call Parsing
-            try:
-                tool_parser = tool_parser_cls(tokenizer)
-            except RuntimeError as e:
-                logger.exception("Error in tool parser creation.")
-                raise e
+            # Retry on "Already borrowed" RuntimeError from the
+            # HuggingFace tokenizer (concurrent thread contention).
+            # See https://github.com/huggingface/tokenizers/issues/537
+            max_tries = 3
+            for attempt in range(1, max_tries + 1):
+                try:
+                    tool_parser = tool_parser_cls(tokenizer)
+                    break
+                except RuntimeError as e:
+                    if (
+                        e.args
+                        and e.args[0] == "Already borrowed"
+                        and attempt < max_tries
+                    ):
+                        logger.warning(
+                            "Tokenizer already borrowed during tool "
+                            "parser creation. Retrying (%d/%d)...",
+                            attempt,
+                            max_tries,
+                        )
+                        time.sleep(0.5)
+                    else:
+                        logger.exception(
+                            "Error in tool parser creation.")
+                        raise e
             tool_call_info = tool_parser.extract_tool_calls(
                 content if content is not None else "",
                 request=request,  # type: ignore
