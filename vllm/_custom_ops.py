@@ -2131,6 +2131,21 @@ def selective_scan_fwd(
     cu_chunk_seqlen: torch.Tensor | None = None,
     last_chunk_indices: torch.Tensor | None = None,
 ):
+    from vllm.platforms import current_platform
+
+    if current_platform.is_xpu():
+        from vllm.model_executor.layers.mamba.ops.xpu_selective_scan import (
+            xpu_selective_scan_fwd,
+        )
+        xpu_selective_scan_fwd(
+            u, delta, A, B, C, D_, z_, delta_bias_,
+            delta_softplus, query_start_loc, cache_indices,
+            has_initial_state, ssm_states, null_block_id, block_size,
+            block_idx_first_scheduled_token, block_idx_last_scheduled_token,
+            initial_state_idx, cu_chunk_seqlen, last_chunk_indices,
+        )
+        return
+
     torch.ops._C.selective_scan_fwd(
         u,
         delta,
