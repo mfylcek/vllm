@@ -487,10 +487,44 @@ class INCConfig(QuantizationConfig):
     def override_quantization_method(
         cls, hf_quant_cfg, user_quant, hf_config=None
     ) -> "QuantizationMethods | None":
-        """Override the `auto-round` method to `inc`."""
+        """Override ``auto-round`` and compatible ``gptq`` to ``inc``.
+
+        On XPU, GPTQ's Exllama/Marlin kernels are unavailable.  When the
+        checkpoint is 4-bit symmetric without activation reordering we can
+        serve it through the native ``int4_gemm_w4a16`` kernel exposed by
+        :class:`INCXPULinearMethod`.
+        """
         is_auto_round_format = hf_quant_cfg.get("quant_method", None) == "auto-round"
         if is_auto_round_format:
             return cls.get_name()
+
+        # On XPU, route compatible GPTQ models through INC to use the
+        # native int4_gemm_w4a16 kernel (GPTQ Exllama/Marlin kernels are
+        # CUDA-only).
+        if current_platform.is_xpu():
+            is_gptq = hf_quant_cfg.get("quant_method", None) == "gptq"
+            is_valid_user_quant = user_quant is None or user_quant == "inc"
+            if is_gptq and is_valid_user_quant:
+                num_bits = hf_quant_cfg.get("bits")
+                sym = hf_quant_cfg.get("sym")
+                desc_act = hf_quant_cfg.get("desc_act", False)
+                if num_bits == 4 and sym and not desc_act:
+                    logger.info(
+                        "GPTQ model detected on XPU. Routing to INC "
+                        "quantization to use the native int4 GEMM kernel."
+                    )
+                    return cls.get_name()
+                else:
+                    logger.warning(
+                        "GPTQ model on XPU requires 4-bit, sym=True, "
+                        "desc_act=False for INC routing. Got bits=%s, "
+                        "sym=%s, desc_act=%s. Falling back to default "
+                        "GPTQ path (may fail without CUDA kernels).",
+                        num_bits,
+                        sym,
+                        desc_act,
+                    )
+
         return None
 
 
