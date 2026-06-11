@@ -228,6 +228,14 @@ class XPUMLAImpl(MLACommonImpl[XPUMLAMetadata]):
 
         if self.need_to_return_lse_for_decode:
             o, lse = attn_out
+            # The XPU FA2 kernel sizes its output to the query head dim
+            # (kv_lora_rank + qk_rope_head_dim); keep only the kv_lora_rank
+            # latent channels expected by the v up-projection.
+            o = o[..., : self.kv_lora_rank]
             # FA returns LSE in shape [H, B] but DCP wants [B, H].
             return o, lse.transpose(0, 1)
+        # The XPU FA2 kernel sizes its output to the query head dim
+        # (kv_lora_rank + qk_rope_head_dim); keep only the kv_lora_rank
+        # latent channels expected by the v up-projection.
+        attn_out = attn_out[..., : self.kv_lora_rank]
         return attn_out, None
